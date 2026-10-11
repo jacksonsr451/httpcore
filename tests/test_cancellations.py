@@ -150,6 +150,56 @@ async def test_h11_timeout_during_request():
 
 
 @pytest.mark.anyio
+async def test_h11_request_body_async_cleanup_completes_when_cancelled():
+    body_started = anyio.Event()
+    body_finalized = False
+
+    class SlowWriteStream(httpcore.AsyncNetworkStream):
+        def __init__(self) -> None:
+            self.write_count = 0
+
+        async def write(
+            self, buffer: bytes, timeout: typing.Optional[float] = None
+        ) -> None:
+            self.write_count += 1
+            if self.write_count == 2:
+                await body_started.wait()
+                await anyio.sleep_forever()
+
+        async def read(
+            self, max_bytes: int, timeout: typing.Optional[float] = None
+        ) -> bytes:
+            raise AssertionError("response reading should not start")
+
+        async def aclose(self) -> None:
+            pass
+
+    async def request_body() -> typing.AsyncIterator[bytes]:
+        nonlocal body_finalized
+        try:
+            body_started.set()
+            yield b"body"
+            yield b"unreached"
+        finally:
+            # Model asynchronous resource release in the producer itself.
+            await anyio.sleep(0)
+            body_finalized = True
+
+    origin = httpcore.Origin(b"http", b"example.com", 80)
+    conn = httpcore.AsyncHTTP11Connection(origin=origin, stream=SlowWriteStream())
+    async with anyio.create_task_group() as task_group:
+
+        async def send_request() -> None:
+            await conn.request("POST", "http://example.com/", content=request_body())
+
+        task_group.start_soon(send_request)
+        await body_started.wait()
+        task_group.cancel_scope.cancel()
+
+    assert body_finalized
+
+
+@pytest.mark.anyio
 async def test_h11_timeout_during_response():
     """
     An async timeout on an HTTP/1.1 during the response reading

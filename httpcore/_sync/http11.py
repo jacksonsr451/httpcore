@@ -167,7 +167,8 @@ class HTTP11Connection(ConnectionInterface):
             # See https://github.com/encode/httpx/issues/3597
             close = getattr(body, "close", None)
             if close is not None:
-                close()
+                with ShieldCancellation():
+                    close()
 
         self._send_event(h11.EndOfMessage(), timeout=timeout)
 
