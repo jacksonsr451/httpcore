@@ -1,5 +1,6 @@
 [build-system]
-requires = ["hatchling", "hatch-fancy-pypi-readme"]
+# Twine 6.1 only accepts core metadata through 2.4.
+requires = ["hatchling<1.32", "hatch-fancy-pypi-readme"]
 build-backend = "hatchling.build"
 
 [project]
